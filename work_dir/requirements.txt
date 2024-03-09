@@ -1,0 +1,4 @@
+natasha
+nltk
+tqdm
+pandas
