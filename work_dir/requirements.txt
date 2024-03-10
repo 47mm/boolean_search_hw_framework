@@ -2,4 +2,3 @@ natasha
 nltk
 tqdm
 pandas
-pickle
