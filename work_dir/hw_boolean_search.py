@@ -11,6 +11,7 @@ import nltk
 nltk.download('stopwords')
 import pandas as pd
 from tqdm import tqdm
+import pickle
 
 
 class Index:
@@ -32,7 +33,10 @@ class Index:
                         self.inverted_index[word].add(doc_id)
                     else:
                         self.inverted_index[word] = {doc_id}
-
+        with open('saved_dictionary.pkl', 'wb') as f:
+            pickle.dump(self.inverted_index, f)
+        # with open('saved_dictionary.pkl', 'rb') as f:
+        #   self.inverted_index = pickle.load(f)
 
     def _preproccess_line(self, line):
         s = re.sub(r'[^A-ZА-Я0-9 ]', '', line)
@@ -50,6 +54,7 @@ class Index:
     def get_index(self):
         return self.inverted_index
 
+
 class QueryTree:
     def __init__(self, qid, query):
         self.qid = qid
@@ -57,17 +62,61 @@ class QueryTree:
 
     def search(self, index):
         reversed_index = index.get_index()
+        print( self.qid, self._split(self.query, reversed_index))
+        return self.qid, self._split(self.query, reversed_index)
+
+    def _split(self, query, reversed_index):
         results = None
-        for q in self.query.split(' '):
-            if '(' in q and ')' in q:
-                q = q[1:-1]
-                for or_q in q.split('|'):
-                    postings = reversed_index.get(or_q, set())
+        bracket_block = 0
+        or_block = False
+        q = ''
+        for c in query:
+            q += c
+            if c == '(':
+                bracket_block += 1
+                continue
+            if bracket_block and c != ')':
+                continue
+            if c == ')':
+                bracket_block -= 1
+                if bracket_block == 0:
+                    postings = self._split(q[1:-1], reversed_index)
+                    results = results & postings if results is not None else postings
+                    q = ''
+                continue
+            if c == '|' and not bracket_block:
+                if q[:-1]:
+                    postings = self._split(q[:-1], reversed_index)
                     results = results | postings if results is not None else postings
-            else:
+                    or_block = True
+                q = ''
+            if c == ' ' and not bracket_block and not or_block:
+                if q.strip():
+                    postings = self._split(q[:-1], reversed_index)
+                    results = results & postings if results is not None else postings
+                q = ''
+                continue
+            if c == ' ':
+                if not q.strip():
+                    or_block = False
+                    q = ''
+                continue
+        q = q.strip()
+        if ' ' in q:
+            for q_and in q.split(' '):
+                postings = reversed_index.get(q_and, set())
+                if or_block:
+                    results = results | postings if results is not None else postings
+                else:
+                    results = results & postings if results is not None else postings
+        else:
+            if q:
                 postings = reversed_index.get(q, set())
-                results = results & postings if results is not None else postings
-        return self.qid, results
+                if or_block:
+                    results = results | postings if results is not None else postings
+                else:
+                    results = results & postings if results is not None else postings
+        return results
 
 
 class SearchResults:
@@ -82,8 +131,8 @@ class SearchResults:
         df = pd.read_csv(objects_file)
         ans = []
         for qid in df['QueryId'].unique():
-            find = self.results.get(qid, set())[1]
-            ans.extend(df[df['QueryId'] == qid]['DocumentId'].str[1:-1].astype(int).isin(find).astype(int).values)
+            find = self.results[qid][1]
+            ans.extend(df[df['QueryId'] == qid]['DocumentId'].str[1:].astype(int).isin(find).astype(int).values)
         ans = pd.DataFrame({
             'ObjectId': 1 + np.arange(len(ans)),
             'Relevance': ans,
