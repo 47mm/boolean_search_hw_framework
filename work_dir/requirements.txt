@@ -1,4 +1,3 @@
 natasha
 nltk
 tqdm
-pandas
